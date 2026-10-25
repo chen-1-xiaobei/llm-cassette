@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "key": "be2d13005f351a4b",
+      "request": {
+        "model": "deepseek-chat",
+        "tools": [
+          "search_knowledge_base"
+        ],
+        "messages": [
+          {
+            "role": "human",
+            "content": "出差住宿一晚最多能报多少钱？"
+          }
+        ]
+      },
+      "response": {
+        "content": "",
+        "tool_calls": [
+          {
+            "name": "search_knowledge_base",
+            "args": {
+              "question": "住宿标准",
+              "top_k": 4
+            },
+            "id": "c1"
+          }
+        ]
+      }
+    }
+  ]
+}
