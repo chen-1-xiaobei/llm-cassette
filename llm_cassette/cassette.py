@@ -11,14 +11,21 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import tempfile
 from dataclasses import dataclass, field
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
+from threading import Lock
 from typing import Any, AsyncIterator, Callable, Iterable
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from .keys import message_to_dict, request_key
+
+logger = logging.getLogger("llm_cassette")
 
 CASSETTE_VERSION = 1
 ENV_PATH = "LLM_CASSETTE"
@@ -26,8 +33,58 @@ ENV_MODE = "LLM_CASSETTE_MODE"
 MODES = ("record", "replay")
 
 
+def _langchain_core_version() -> str:
+    try:
+        return _pkg_version("langchain-core")
+    except PackageNotFoundError:  # pragma: no cover
+        return "unknown"
+
+
 class CassetteMissing(LookupError):
     """回放时找不到对应记录。故意用异常而不是返回空，避免静默通过。"""
+
+
+def _content_text(chunk: Any) -> str:
+    """从一个流式块里取正文文本（可能是 str，也可能是内容块列表）。"""
+    content = getattr(chunk, "content", chunk)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return ""
+
+
+def _assemble_tool_calls(chunks: Iterable[dict]) -> list[dict]:
+    """把流式的 tool_call_chunks（可能被切成多片）拼回完整的工具调用。
+
+    流式模式下模型会把一次工具调用拆成多个 chunk，`name` / `args` / `id`
+    落在不同块里，args 甚至是半截 JSON。不回拼就会丢掉整次工具调用 ——
+    这正是之前录制流式时静默丢工具调用的原因。
+    """
+    grouped: dict[int, dict[str, str]] = {}
+    for chunk in chunks:
+        index = chunk.get("index", 0)
+        slot = grouped.setdefault(index, {"name": "", "args": "", "id": ""})
+        slot["name"] += chunk.get("name") or ""
+        slot["args"] += chunk.get("args") or ""
+        slot["id"] += chunk.get("id") or ""
+
+    calls: list[dict] = []
+    for index in sorted(grouped):
+        slot = grouped[index]
+        raw_args = slot["args"]
+        try:
+            args: Any = json.loads(raw_args) if raw_args else {}
+        except ValueError:
+            args = raw_args          # 拼接失败就保留原文，至少不丢信息
+        calls.append({"name": slot["name"], "args": args, "id": slot["id"]})
+    return calls
 
 
 def _assert_replayable(value: Any) -> str:
@@ -52,6 +109,7 @@ class Cassette:
     redact: Callable[[Any], Any] | None = None
     _entries: dict[str, list[dict]] = field(default_factory=dict, repr=False)
     _cursor: dict[str, int] = field(default_factory=dict, repr=False)
+    _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.path = Path(self.path)
@@ -72,17 +130,42 @@ class Cassette:
         version = data.get("version")
         if version != CASSETTE_VERSION:
             raise ValueError(f"不支持的录像格式版本：{version}（期望 {CASSETTE_VERSION}）")
+        recorded = data.get("langchain_core")
+        current = _langchain_core_version()
+        if recorded and recorded != current:
+            # 不直接失败：多数升级是兼容的。但要提醒——消息序列化一变，指纹就会
+            # 全变、所有录像失效，而报错只会说"查不到记录"，不提醒根本想不到
+            # 是依赖升级导致的。
+            logger.warning(
+                "录像由 langchain-core %s 录制，当前为 %s。"
+                "若回放报 CassetteMissing，先怀疑依赖升级导致指纹变化。",
+                recorded, current,
+            )
         for entry in data.get("entries", []):
             self._entries.setdefault(entry["key"], []).append(entry)
 
     def save(self) -> None:
-        entries = [entry for key in self._entries for entry in self._entries[key]]
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        text = json.dumps(
-            {"version": CASSETTE_VERSION, "entries": entries},
-            ensure_ascii=False, indent=2, default=str,
-        )
-        self.path.write_text(text + "\n", encoding="utf-8")
+        with self._lock:
+            entries = [entry for key in self._entries for entry in self._entries[key]]
+            payload = {
+                "version": CASSETTE_VERSION,
+                "langchain_core": _langchain_core_version(),
+                "entries": entries,
+            }
+            text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            # 原子替换：先写临时文件再 os.replace。直接覆盖的话，进程中途崩溃
+            # 会留下半截 JSON，整个录像文件就废了。
+            handle, temp_name = tempfile.mkstemp(
+                dir=str(self.path.parent), prefix=".cassette-", suffix=".tmp"
+            )
+            try:
+                with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                    stream.write(text + "\n")
+                os.replace(temp_name, self.path)
+            except BaseException:
+                Path(temp_name).unlink(missing_ok=True)
+                raise
 
     # ---------- 记录 / 取用 ----------
 
@@ -93,7 +176,8 @@ class Cassette:
         entry: dict[str, Any] = {"key": key, "request": request, "response": response}
         if note:
             entry["note"] = note
-        self._entries.setdefault(key, []).append(entry)
+        with self._lock:
+            self._entries.setdefault(key, []).append(entry)
 
     def take(self, key: str) -> dict:
         entries = self._entries.get(key)
@@ -214,25 +298,46 @@ class CassetteModel:
             return response
         return _dict_to_message(self.cassette.take(key)["response"])
 
-    async def astream(self, messages: Any, **kwargs: Any) -> AsyncIterator[str]:
+    async def astream(self, messages: Any, **kwargs: Any) -> AsyncIterator[Any]:
+        """流式录制与回放。
+
+        录制时**原样透传**真实模型的 chunk（不再抽取字符串），因为流式里除了文本，
+        还可能有 `tool_call_chunks`——模型会把一次工具调用拆成多个块，args 甚至是
+        半截 JSON。早期版本只取 `chunk.content`，于是**流式下的工具调用被静默丢弃**，
+        回放时模型"什么都不想做"，工具永远调不到。
+
+        回放时按记录重建：文本按 `replay_chunk` 切块，工具调用作为最后一个 chunk 发出。
+        """
         key = self._key(messages)
         if self.cassette.mode == "record":
             pieces: list[str] = []
+            tool_chunks: list[dict] = []
             async for chunk in self._bound_real().astream(messages, **kwargs):
-                text = getattr(chunk, "content", chunk)
-                if isinstance(text, str) and text:
-                    pieces.append(text)
-                    yield text
+                pieces.append(_content_text(chunk))
+                for tool_chunk in (getattr(chunk, "tool_call_chunks", None) or []):
+                    tool_chunks.append(dict(tool_chunk))
+                yield chunk          # 透传，调用方拿到的是真实对象
+
             self.cassette.put(
                 key, self._request_payload(messages),
-                {"content": "".join(pieces), "tool_calls": [], "streamed": True},
+                {
+                    "content": "".join(pieces),
+                    "tool_calls": _assemble_tool_calls(tool_chunks),
+                    "tool_call_chunks": tool_chunks,
+                    "streamed": True,
+                },
             )
             self.cassette.save()
             return
 
-        text = self.cassette.take(key)["response"].get("content", "")
+        recorded = self.cassette.take(key)["response"]
+        text = recorded.get("content", "")
         for start in range(0, len(text), self.replay_chunk):
-            yield text[start:start + self.replay_chunk]
+            yield AIMessageChunk(content=text[start:start + self.replay_chunk])
+
+        tool_chunks = recorded.get("tool_call_chunks")
+        if tool_chunks:
+            yield AIMessageChunk(content="", tool_call_chunks=tool_chunks)
 
 
 class CassetteStructuredModel:

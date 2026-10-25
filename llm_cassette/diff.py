@@ -30,10 +30,8 @@ class EntryDiff:
     kind: str
     old: dict | None
     new: dict | None
-
-    @property
-    def is_change(self) -> bool:
-        return self.kind != ONLY_NEW or True
+    old_descs: list[str] | None = None     # 同一指纹多次调用时的逐条描述
+    new_descs: list[str] | None = None
 
 
 @dataclass
@@ -69,14 +67,15 @@ def describe(response: dict) -> str:
     return "文本回复: " + (content[:60] if content else "(空)")
 
 
-def _load(path: Path) -> dict[str, dict]:
+def _load(path: Path) -> dict[str, list[dict]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     version = data.get("version")
     if version != CASSETTE_VERSION:
         raise ValueError(f"{path}: 不支持的录像格式版本 {version}（期望 {CASSETTE_VERSION}）")
-    entries: dict[str, dict] = {}
+    entries: dict[str, list[dict]] = {}
     for entry in data.get("entries", []):
-        entries.setdefault(entry["key"], entry)     # 同一键只取第一条用于对比
+        # 同一指纹可能对应多次调用，全部保留 —— 只取第一条会漏掉后面的变化
+        entries.setdefault(entry["key"], []).append(entry)
     return entries
 
 
@@ -85,21 +84,23 @@ def diff_files(old_path: str | Path, new_path: str | Path) -> CassetteDiff:
     new = _load(Path(new_path))
     result = CassetteDiff()
 
-    for key, old_entry in old.items():
-        new_entry = new.get(key)
-        if new_entry is None:
-            result.only_old.append(EntryDiff(key, ONLY_OLD, old_entry, None))
+    for key, old_entries in old.items():
+        new_entries = new.get(key)
+        if new_entries is None:
+            result.only_old.append(EntryDiff(key, ONLY_OLD, old_entries[0], None))
             continue
-        old_response = old_entry.get("response", {})
-        new_response = new_entry.get("response", {})
-        if describe(old_response) == describe(new_response):
+        old_descs = [describe(entry.get("response", {})) for entry in old_entries]
+        new_descs = [describe(entry.get("response", {})) for entry in new_entries]
+        if old_descs == new_descs:
             result.same.append(key)
         else:
-            result.changed.append(EntryDiff(key, CHANGED, old_entry, new_entry))
+            result.changed.append(EntryDiff(
+                key, CHANGED, old_entries[0], new_entries[0], old_descs, new_descs,
+            ))
 
-    for key, new_entry in new.items():
+    for key, new_entries in new.items():
         if key not in old:
-            result.only_new.append(EntryDiff(key, ONLY_NEW, None, new_entry))
+            result.only_new.append(EntryDiff(key, ONLY_NEW, None, new_entries[0]))
 
     return result
 
@@ -109,8 +110,16 @@ def render(diff: CassetteDiff) -> str:
     for item in diff.changed:
         lines.append("")
         lines.append(f"~ {item.key}  （模型输出变了）")
-        lines.append(f"    改前: {describe(item.old['response'])}")
-        lines.append(f"    改后: {describe(item.new['response'])}")
+        old_descs = item.old_descs or [describe(item.old["response"])]
+        new_descs = item.new_descs or [describe(item.new["response"])]
+        many = len(old_descs) > 1 or len(new_descs) > 1
+        for index in range(max(len(old_descs), len(new_descs))):
+            before = old_descs[index] if index < len(old_descs) else "(无)"
+            after = new_descs[index] if index < len(new_descs) else "(无)"
+            if many:
+                lines.append(f"    第 {index + 1} 次调用")
+            lines.append(f"        改前: {before}")
+            lines.append(f"        改后: {after}")
     for item in diff.only_old:
         lines.append("")
         lines.append(f"- {item.key}  （只在旧录像里：输入变了，或这轮调用不再发生）")
@@ -127,18 +136,22 @@ def render(diff: CassetteDiff) -> str:
 def render_entries(path: str | Path) -> str:
     """列出录像里的每一条（`inspect` 用）。"""
     entries = _load(Path(path))
-    lines = [f"{path}: 共 {len(entries)} 条"]
-    for index, (key, entry) in enumerate(entries.items(), 1):
-        request = entry.get("request", {})
-        messages = request.get("messages", [])
-        last_user = next(
-            (m.get("content", "") for m in reversed(messages) if m.get("role") == "human"), ""
-        )
-        tools = request.get("tools") or []
-        lines.append("")
-        lines.append(f"[{index}] {key}")
-        lines.append(f"    工具: {tools or '(无)'}   消息数: {len(messages)}")
-        if last_user:
-            lines.append(f"    最后一句用户: {last_user[:50]}")
-        lines.append(f"    → {describe(entry.get('response', {}))}")
+    total = sum(len(items) for items in entries.values())
+    lines = [f"{path}: 共 {total} 条（{len(entries)} 个不同指纹）"]
+    index = 0
+    for key, items in entries.items():
+        for entry in items:
+            index += 1
+            request = entry.get("request", {})
+            messages = request.get("messages", [])
+            last_user = next(
+                (m.get("content", "") for m in reversed(messages) if m.get("role") == "human"), ""
+            )
+            tools = request.get("tools") or []
+            lines.append("")
+            lines.append(f"[{index}] {key}")
+            lines.append(f"    工具: {tools or '(无)'}   消息数: {len(messages)}")
+            if last_user:
+                lines.append(f"    最后一句用户: {last_user[:50]}")
+            lines.append(f"    → {describe(entry.get('response', {}))}")
     return "\n".join(lines)

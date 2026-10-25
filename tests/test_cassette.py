@@ -13,6 +13,7 @@ from llm_cassette import (
     CassetteModel,
     record_session,
     replay_session,
+    request_key,
     wrap_model,
 )
 
@@ -110,6 +111,16 @@ def test_same_key_consumed_in_order(tmp_path):
 
 # ---------- 流式 ----------
 
+def _text_of(chunk) -> str:
+    """流式块可能是 str，也可能是 AIMessageChunk。"""
+    content = getattr(chunk, "content", chunk)
+    return content if isinstance(content, str) else ""
+
+
+def _tool_chunks_of(chunk) -> list:
+    return list(getattr(chunk, "tool_call_chunks", None) or [])
+
+
 def test_stream_record_and_replay(tmp_path):
     path = tmp_path / "c.json"
     _, recorder = _record(path, [["员工需在 ", "三十天内 ", "提交。"]])
@@ -117,13 +128,82 @@ def test_stream_record_and_replay(tmp_path):
     async def collect(model):
         return [piece async for piece in model.astream([HumanMessage("q")])]
 
-    assert "".join(asyncio.run(collect(recorder))) == "员工需在 三十天内 提交。"
+    text = "".join(_text_of(c) for c in asyncio.run(collect(recorder)))
+    assert text == "员工需在 三十天内 提交。"
 
     replay_model = _replay(path)
     replay_model.replay_chunk = 4
     pieces = asyncio.run(collect(replay_model))
-    assert "".join(pieces) == "员工需在 三十天内 提交。"
+    assert "".join(_text_of(c) for c in pieces) == "员工需在 三十天内 提交。"
     assert len(pieces) > 1, "回放应分块产出"
+
+
+def test_stream_preserves_tool_calls(tmp_path):
+    """流式里模型把一次工具调用拆成多块，录制与回放都不能丢。
+
+    这是修之前的一个静默 bug：只取 `chunk.content`，而工具调用在
+    `tool_call_chunks` 里、content 是空串，于是整次工具调用被丢掉。
+    """
+    from langchain_core.messages import AIMessageChunk
+
+    path = tmp_path / "c.json"
+    chunks = [
+        AIMessageChunk(content="我需要查一下。"),
+        AIMessageChunk(content="", tool_call_chunks=[
+            {"name": "search", "args": '{"q":', "id": "c1", "index": 0},
+        ]),
+        AIMessageChunk(content="", tool_call_chunks=[
+            {"args": '"住宿标准"}', "index": 0},
+        ]),
+    ]
+    _, recorder = _record(path, [chunks])
+
+    async def drain(model):
+        return [piece async for piece in model.astream([HumanMessage("q")])]
+
+    asyncio.run(drain(recorder))
+
+    # 落盘时应当把碎片拼回完整的工具调用
+    entry = next(iter(Cassette(path, "replay")._entries.values()))[0]
+    calls = entry["response"]["tool_calls"]
+    assert calls[0]["name"] == "search"
+    assert calls[0]["args"] == {"q": "住宿标准"}, "半截 JSON 必须被拼回对象"
+
+    replayed = asyncio.run(drain(_replay(path)))
+    assert "".join(_text_of(c) for c in replayed) == "我需要查一下。"
+    collected = [chunk for item in replayed for chunk in _tool_chunks_of(item)]
+    assert collected, "回放必须还原 tool_call_chunks"
+    assert collected[0]["name"] == "search"
+
+
+def test_stream_replay_tolerates_old_cassette_without_tool_chunks(tmp_path):
+    """老格式录像（没有 tool_call_chunks 字段）仍应能回放。"""
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({
+        "version": CASSETTE_VERSION,
+        "entries": [{
+            "key": request_key("m", [HumanMessage("q")], ("search",)),
+            "request": {"model": "m", "tools": ["search"], "messages": []},
+            "response": {"content": "纯文本答案", "tool_calls": [], "streamed": True},
+        }],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    async def drain(model):
+        return [piece async for piece in model.astream([HumanMessage("q")])]
+
+    replayed = asyncio.run(drain(_replay(path)))
+    assert "".join(_text_of(c) for c in replayed) == "纯文本答案"
+    assert all(not _tool_chunks_of(c) for c in replayed)
+
+
+def test_header_records_dependency_version(tmp_path):
+    """文件头记录 langchain-core 版本：升级导致指纹失效时才有线索。"""
+    path = tmp_path / "c.json"
+    _, recorder = _record(path, [AIMessage("x")])
+    recorder.invoke([HumanMessage("q")])
+
+    header = json.loads(path.read_text(encoding="utf-8"))
+    assert header["langchain_core"] not in (None, "", "unknown")
 
 
 # ---------- 文件格式 ----------

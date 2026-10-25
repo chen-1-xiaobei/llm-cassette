@@ -66,3 +66,29 @@ def test_diff_detects_model_switch(tmp_path):
 
     diff = diff_files(a, b)
     assert diff.only_old and diff.only_new
+
+
+def test_diff_compares_all_entries_of_same_key(tmp_path):
+    """同一输入被调用多次时，后面的记录必须也参与对比。
+
+    早期实现按键去重只留第一条，于是"第 2 次调用变了"会被完全忽略。
+    """
+    def record_two_calls(path, responses):
+        model = CassetteModel(Cassette(path, "record"), FakeChatModel(responses), model_name="m")
+        model.invoke([HumanMessage("q")])
+        model.invoke([HumanMessage("q")])
+
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    record_two_calls(a, [AIMessage("第一次"), AIMessage("第二次")])
+    record_two_calls(b, [AIMessage("第一次"), AIMessage("第二次")])
+    assert not diff_files(a, b).has_change, "完全相同的两份录像不应有差异"
+
+    # 只改第二次调用的输出
+    b.unlink()
+    record_two_calls(b, [AIMessage("第一次"), AIMessage("第二次变了")])
+
+    changed = diff_files(a, b)
+    assert len(changed.changed) == 1
+    text = render(changed)
+    assert "第二次变了" in text
+    assert "第 2 次调用" in text, "应当指出是第几次调用发生了变化"
