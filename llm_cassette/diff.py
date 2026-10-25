@@ -113,13 +113,14 @@ def render(diff: CassetteDiff) -> str:
         old_descs = item.old_descs or [describe(item.old["response"])]
         new_descs = item.new_descs or [describe(item.new["response"])]
         many = len(old_descs) > 1 or len(new_descs) > 1
+        indent = "        " if many else "    "
         for index in range(max(len(old_descs), len(new_descs))):
             before = old_descs[index] if index < len(old_descs) else "(无)"
             after = new_descs[index] if index < len(new_descs) else "(无)"
             if many:
                 lines.append(f"    第 {index + 1} 次调用")
-            lines.append(f"        改前: {before}")
-            lines.append(f"        改后: {after}")
+            lines.append(f"{indent}改前: {before}")
+            lines.append(f"{indent}改后: {after}")
     for item in diff.only_old:
         lines.append("")
         lines.append(f"- {item.key}  （只在旧录像里：输入变了，或这轮调用不再发生）")
