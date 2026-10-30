@@ -1,11 +1,11 @@
-"""生成两份演示录像，用来说明 `llm-cassette diff` 能看出什么。
+"""生成两份演示录像，用来说明 `agent-cassette diff` 能看出什么。
 
 场景：**同一个模型标识、同一段请求**，但在服务端升级之后返回变了——
 模型把检索词从完整句子退化成了两个词。这类退化在回归测试里只会显示"红了"，
 `diff` 才能告诉你"它把查询写短了"。
 
     python examples/make_demo.py
-    llm-cassette diff examples/cassettes/before.json examples/cassettes/after.json
+    agent-cassette diff examples/cassettes/before.json examples/cassettes/after.json
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ sys.path.insert(0, str(HERE.parent))
 
 from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
 
-from llm_cassette import Cassette, CassetteModel  # noqa: E402
+from agent_cassette import Cassette, CassetteModel  # noqa: E402
 
 OUT = HERE / "cassettes"
 MODEL = "deepseek-chat"

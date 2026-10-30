@@ -2,7 +2,7 @@
 from langchain_core.messages import AIMessage, HumanMessage
 
 from _fakes import FakeChatModel, tool_call
-from llm_cassette import Cassette, CassetteModel, diff_files, render
+from agent_cassette import Cassette, CassetteModel, diff_files, render
 
 
 def _record(path, responses, question="q", model_name="m"):

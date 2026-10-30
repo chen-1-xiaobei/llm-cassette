@@ -25,11 +25,11 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 
 from .keys import message_to_dict, request_key
 
-logger = logging.getLogger("llm_cassette")
+logger = logging.getLogger("agent_cassette")
 
 CASSETTE_VERSION = 1
-ENV_PATH = "LLM_CASSETTE"
-ENV_MODE = "LLM_CASSETTE_MODE"
+ENV_PATH = "AGENT_CASSETTE"
+ENV_MODE = "AGENT_CASSETTE_MODE"
 MODES = ("record", "replay")
 
 
@@ -413,7 +413,7 @@ def wrap_model(real: Any = None, cassette: Cassette | str | Path | None = None,
         # 2) 传路径 + 模式
         wrap_model(real, "x.json", mode="record")
 
-        # 3) 什么都不传：读环境变量 LLM_CASSETTE / LLM_CASSETTE_MODE
+        # 3) 什么都不传：读环境变量 AGENT_CASSETTE / AGENT_CASSETTE_MODE
         wrap_model(real)          # 未设置环境变量时原样返回 real
 
     第三种是为了"生产代码零改动"——只在测试环境设两个环境变量即可。

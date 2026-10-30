@@ -4,7 +4,7 @@
 
 例如把 deepseek-chat 换成另一个模型后：
 
-    $ llm-cassette diff before.json after.json
+    $ agent-cassette diff before.json after.json
     ~ 8ad8b3b526c933d8  第 1 轮检索
         改前: 调用工具: search_knowledge_base({"question": "出差住宿报销标准是多少"})
         改后: 调用工具: search_knowledge_base({"question": "住宿标准"})

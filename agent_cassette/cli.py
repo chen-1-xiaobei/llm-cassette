@@ -1,9 +1,9 @@
 """命令行入口。
 
-    llm-cassette inspect  x.json                # 看录像里有什么
-    llm-cassette diff     a.json b.json         # 对比两份录像的模型行为
-    llm-cassette record   x.json -- python app.py   # 用录像模式跑任意命令
-    llm-cassette replay   x.json -- python app.py   # 用回放模式跑（不联网、不花钱）
+    agent-cassette inspect  x.json                # 看录像里有什么
+    agent-cassette diff     a.json b.json         # 对比两份录像的模型行为
+    agent-cassette record   x.json -- python app.py   # 用录像模式跑任意命令
+    agent-cassette replay   x.json -- python app.py   # 用回放模式跑（不联网、不花钱）
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _cmd_diff(args: argparse.Namespace) -> int:
             return 2
     diff = diff_files(args.old, args.new)
     print(render(diff))
-    # 有差异返回 1，便于接进 CI：`llm-cassette diff a.json b.json || echo 行为变了`
+    # 有差异返回 1，便于接进 CI：`agent-cassette diff a.json b.json || echo 行为变了`
     return 0 if not diff.has_change else 1
 
 
@@ -43,7 +43,7 @@ def _cmd_run(mode: str, args: argparse.Namespace) -> int:
         command = command[1:]
     if not command:
         print("需要在 -- 之后给出要执行的命令，例如：", file=sys.stderr)
-        print(f"  llm-cassette {mode} x.json -- python my_agent.py", file=sys.stderr)
+        print(f"  agent-cassette {mode} x.json -- python my_agent.py", file=sys.stderr)
         return 2
 
     path = Path(args.file)
@@ -54,8 +54,8 @@ def _cmd_run(mode: str, args: argparse.Namespace) -> int:
     env = dict(os.environ)
     env[ENV_PATH] = str(path.resolve())
     env[ENV_MODE] = mode
-    print(f"[llm-cassette] mode={mode} cassette={path}", file=sys.stderr)
-    print(f"[llm-cassette] 提示：在被测代码里用 wrap_model(model) 即可生效", file=sys.stderr)
+    print(f"[agent-cassette] mode={mode} cassette={path}", file=sys.stderr)
+    print(f"[agent-cassette] 提示：在被测代码里用 wrap_model(model) 即可生效", file=sys.stderr)
     return subprocess.call(command, env=env)
 
 
@@ -71,7 +71,7 @@ def _cmd_count(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="llm-cassette",
+        prog="agent-cassette",
         description="录制并回放 LLM 交互，让 Agent 行为可确定性测试",
     )
     sub = parser.add_subparsers(dest="command_name", required=True)

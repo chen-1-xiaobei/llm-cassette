@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-cassette"
+name = "agent-cassette"
 version = "0.1.0"
 description = "Record and replay LLM interactions, so agent behaviour can be tested deterministically and for free"
 readme = "README.md"
@@ -26,13 +26,13 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.urls]
-Homepage = "https://github.com/chen-1-xiaobei/llm-cassette"
+Homepage = "https://github.com/chen-1-xiaobei/agent-cassette"
 
 [project.scripts]
-llm-cassette = "llm_cassette.cli:main"
+agent-cassette = "agent_cassette.cli:main"
 
 [tool.setuptools]
-packages = ["llm_cassette"]
+packages = ["agent_cassette"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

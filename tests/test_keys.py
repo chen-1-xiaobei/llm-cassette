@@ -1,7 +1,7 @@
 """指纹算法的单测：稳定性与敏感度。"""
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from llm_cassette import message_to_dict, request_key
+from agent_cassette import message_to_dict, request_key
 
 
 def test_roles_are_normalized():

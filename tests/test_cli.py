@@ -2,8 +2,8 @@
 from langchain_core.messages import AIMessage, HumanMessage
 
 from _fakes import FakeChatModel, tool_call
-from llm_cassette import Cassette, CassetteModel
-from llm_cassette.cli import main
+from agent_cassette import Cassette, CassetteModel
+from agent_cassette.cli import main
 
 
 def _record(path, responses, question="q", model_name="m"):
@@ -64,7 +64,7 @@ def test_record_passes_env_to_subprocess(tmp_path, capfd):
     import sys
 
     path = tmp_path / "c.json"
-    script = "import os; print(os.environ.get('LLM_CASSETTE_MODE'), os.environ.get('LLM_CASSETTE'))"
+    script = "import os; print(os.environ.get('AGENT_CASSETTE_MODE'), os.environ.get('AGENT_CASSETTE'))"
 
     assert main(["record", str(path), "--", sys.executable, "-c", script]) == 0
     out, _ = capfd.readouterr()
@@ -86,7 +86,7 @@ def test_replay_passes_env_when_cassette_exists(tmp_path, capfd):
     path = tmp_path / "c.json"
     Cassette(path, "record").save()          # 先建一个空录像
 
-    script = "import os; print(os.environ.get('LLM_CASSETTE_MODE'))"
+    script = "import os; print(os.environ.get('AGENT_CASSETTE_MODE'))"
     assert main(["replay", str(path), "--", sys.executable, "-c", script]) == 0
     out, _ = capfd.readouterr()
     assert "replay" in out

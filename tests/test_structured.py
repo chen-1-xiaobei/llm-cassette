@@ -4,7 +4,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 from _fakes import FakeChatModel
-from llm_cassette import Cassette, CassetteMissing, CassetteModel
+from agent_cassette import Cassette, CassetteMissing, CassetteModel
 
 
 class Answer(BaseModel):

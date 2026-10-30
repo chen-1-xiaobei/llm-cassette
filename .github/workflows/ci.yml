@@ -37,5 +37,5 @@ jobs:
       # 演示固件是可回放入库的，顺手验证 CLI 真的能用
       - name: 冒烟：CLI 可回放演示录像
         run: |
-          llm-cassette inspect examples/cassettes/before.json
-          llm-cassette diff examples/cassettes/before.json examples/cassettes/before.json
+          agent-cassette inspect examples/cassettes/before.json
+          agent-cassette diff examples/cassettes/before.json examples/cassettes/before.json

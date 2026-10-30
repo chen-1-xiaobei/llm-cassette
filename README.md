@@ -1,7 +1,7 @@
-# llm-cassette
+# agent-cassette
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![CI](https://github.com/chen-1-xiaobei/llm-cassette/actions/workflows/ci.yml/badge.svg)](https://github.com/chen-1-xiaobei/llm-cassette/actions/workflows/ci.yml)
+[![CI](https://github.com/chen-1-xiaobei/agent-cassette/actions/workflows/ci.yml/badge.svg)](https://github.com/chen-1-xiaobei/agent-cassette/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **录制并回放 LLM 交互，让 Agent 的行为可以确定性测试——不联网、不花钱、不需要密钥。**
@@ -9,11 +9,11 @@
 大模型的输出每次都不一样。这带来一个尴尬的局面：你能测工具、能测数据库、能测路由，
 **唯独测不了"模型这一步到底做了什么"**。于是 CI 里永远缺一块，改提示词也只能靠手感。
 
-`llm-cassette` 给模型套一层"录像机"：真实跑一次，把「输入 → 输出」存成 JSON；
+`agent-cassette` 给模型套一层"录像机"：真实跑一次，把「输入 → 输出」存成 JSON；
 之后测试不再问模型，而是按输入查表返回当时那一条。
 
 ```console
-$ llm-cassette diff before.json after.json
+$ agent-cassette diff before.json after.json
 未变 0 条，输出变化 1 条，仅旧录像有 0 条，仅新录像有 0 条
 
 ~ be2d13005f351a4b  （模型输出变了）
@@ -27,7 +27,7 @@ $ llm-cassette diff before.json after.json
 
 ```bash
 pip install -e ".[dev]"        # 开发
-pip install llm-cassette        # 发布后
+pip install agent-cassette        # 发布后
 ```
 
 依赖只有 `langchain-core`，支持任何 LangChain 兼容的聊天模型。
@@ -38,7 +38,7 @@ pip install llm-cassette        # 发布后
 
 ```python
 from langchain_deepseek import ChatDeepSeek
-from llm_cassette import Cassette, wrap_model
+from agent_cassette import Cassette, wrap_model
 
 real = ChatDeepSeek(model="deepseek-chat", temperature=0)
 
@@ -54,7 +54,7 @@ response = model.bind_tools(tools).invoke(messages)   # 与录制时逐字节一
 ### 2. 会话上下文（自动落盘）
 
 ```python
-from llm_cassette import record_session, replay_session
+from agent_cassette import record_session, replay_session
 
 with record_session("session.json") as cassette:
     model = cassette.wrap(real)
@@ -69,25 +69,25 @@ with replay_session("session.json") as cassette:
 代码里只写 `wrap_model(model)`，由环境变量决定行为：
 
 ```python
-from llm_cassette import wrap_model
+from agent_cassette import wrap_model
 
 model = wrap_model(ChatDeepSeek(model="deepseek-chat", temperature=0))
 ```
 
 ```bash
 # 录制一次（真实调用）
-LLM_CASSETTE=session.json LLM_CASSETTE_MODE=record python app.py
+AGENT_CASSETTE=session.json AGENT_CASSETTE_MODE=record python app.py
 
 # 之后所有测试/CI 都用回放
-LLM_CASSETTE=session.json LLM_CASSETTE_MODE=replay python app.py
+AGENT_CASSETTE=session.json AGENT_CASSETTE_MODE=replay python app.py
 ```
 
-未设置 `LLM_CASSETTE` 时 `wrap_model` **原样返回**，对生产没有任何影响。
+未设置 `AGENT_CASSETTE` 时 `wrap_model` **原样返回**，对生产没有任何影响。
 
 ## 命令行
 
 ```console
-$ llm-cassette inspect examples/cassettes/before.json
+$ agent-cassette inspect examples/cassettes/before.json
 examples\cassettes\before.json: 共 1 条
 
 [1] be2d13005f351a4b
@@ -95,9 +95,9 @@ examples\cassettes\before.json: 共 1 条
     最后一句用户: 出差住宿一晚最多能报多少钱？
     → 调用工具: search_knowledge_base({"question": "出差住宿报销标准是多少", "top_k": 4})
 
-$ llm-cassette diff a.json b.json      # 有差异时退出码为 1，可直接接 CI
-$ llm-cassette record session.json -- python app.py
-$ llm-cassette replay session.json -- python app.py
+$ agent-cassette diff a.json b.json      # 有差异时退出码为 1，可直接接 CI
+$ agent-cassette record session.json -- python app.py
+$ agent-cassette replay session.json -- python app.py
 ```
 
 `diff` 是这套东西最实用的一处：回归测试只告诉你"变了没"，它告诉你"**变了什么**"。

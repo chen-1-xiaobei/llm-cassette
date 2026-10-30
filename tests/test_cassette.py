@@ -6,7 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from _fakes import FakeChatModel, FakeTool, tool_call
-from llm_cassette import (
+from agent_cassette import (
     CASSETTE_VERSION,
     Cassette,
     CassetteMissing,
@@ -261,14 +261,14 @@ def test_redact_applies_to_disk_but_not_to_replay(tmp_path):
 # ---------- 接入方式 ----------
 
 def test_wrap_model_is_noop_without_env(monkeypatch):
-    monkeypatch.delenv("LLM_CASSETTE", raising=False)
+    monkeypatch.delenv("AGENT_CASSETTE", raising=False)
     real = FakeChatModel([])
     assert wrap_model(real) is real
 
 
 def test_wrap_model_uses_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("LLM_CASSETTE", str(tmp_path / "c.json"))
-    monkeypatch.setenv("LLM_CASSETTE_MODE", "record")
+    monkeypatch.setenv("AGENT_CASSETTE", str(tmp_path / "c.json"))
+    monkeypatch.setenv("AGENT_CASSETTE_MODE", "record")
     assert isinstance(wrap_model(FakeChatModel([]), model_name="m"), CassetteModel)
 
 
